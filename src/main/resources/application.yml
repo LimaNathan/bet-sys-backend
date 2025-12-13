@@ -1,0 +1,31 @@
+spring:
+  application:
+    name: cotic-bet-backend
+  data:
+    mongodb:
+      uri: ${MONGODB_URI:mongodb://root:rootpassword@localhost:27017/coticbet?authSource=admin}
+
+jwt:
+  secret: ${JWT_SECRET:default-secret-key-for-development-only-change-in-production}
+  expiration: ${JWT_EXPIRATION:86400000}
+
+server:
+  port: 8080
+
+app:
+  daily-bonus-amount: ${DAILY_BONUS_AMOUNT:100}
+  admin:
+    email: ${ADMIN_EMAIL:admin@coticbet.com}
+    password: ${ADMIN_PASSWORD:admin123}
+    initial-balance: ${ADMIN_INITIAL_BALANCE:10000}
+  odds-api:
+    key: ${ODDS_API_KEY:74b0d97c2323c279b2e4306b3f7fd045}
+    base-url: https://api.the-odds-api.com/v4
+    sports: soccer_brazil_campeonato
+    regions: us
+    markets: h2h
+
+logging:
+  level:
+    com.coticbet: DEBUG
+    org.springframework.security: INFO
