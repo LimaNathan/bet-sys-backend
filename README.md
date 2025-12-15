@@ -2,6 +2,8 @@
 
 Sistema de apostas interno com suporte a apostas simples e múltiplas (parlay).
 
+> 🔗 **Frontend**: [bet-sys-frontend](https://github.com/LimaNathan/bet-sys-frontend)
+
 ## 🚀 Tecnologias
 
 - **Java 21** com Spring Boot 3.4
