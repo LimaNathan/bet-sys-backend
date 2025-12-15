@@ -124,6 +124,11 @@ public class OddsApiService {
             Event newEvent = createEventFromApi(apiEvent);
             eventRepository.save(newEvent);
             log.info("Created new event: {}", newEvent.getTitle());
+
+            // Notify all users about new event
+            webSocketService.broadcastGlobalNotification(
+                    "NEW_EVENT",
+                    String.format("🏆 Novo evento disponível: %s", newEvent.getTitle()));
         }
     }
 

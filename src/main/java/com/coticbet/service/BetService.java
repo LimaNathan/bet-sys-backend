@@ -3,23 +3,31 @@ package com.coticbet.service;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.coticbet.domain.entity.Bet;
+import com.coticbet.domain.entity.BetLeg;
 import com.coticbet.domain.entity.Event;
 import com.coticbet.domain.entity.EventOption;
 import com.coticbet.domain.entity.User;
 import com.coticbet.domain.enums.BetStatus;
+import com.coticbet.domain.enums.BetType;
 import com.coticbet.domain.enums.EventStatus;
+import com.coticbet.domain.enums.LegStatus;
 import com.coticbet.domain.enums.PricingModel;
 import com.coticbet.domain.enums.Role;
 import com.coticbet.domain.enums.TransactionOrigin;
 import com.coticbet.dto.request.PlaceBetRequest;
+import com.coticbet.dto.request.PlaceBetRequest.BetSelection;
 import com.coticbet.dto.response.BetResponse;
+import com.coticbet.dto.response.BetResponse.LegResponse;
 import com.coticbet.exception.BusinessException;
 import com.coticbet.exception.ResourceNotFoundException;
 import com.coticbet.repository.BetRepository;
@@ -47,61 +55,115 @@ public class BetService {
             throw new BusinessException("Administrators cannot place bets");
         }
 
-        Event event = eventService.findEventById(request.getEventId());
+        List<BetSelection> selections = request.getSelections();
 
-        // Validate event is open for betting
-        if (event.getStatus() != EventStatus.OPEN) {
-            throw new BusinessException("Event is not open for betting");
+        // Validate: at least 1 selection
+        if (selections == null || selections.isEmpty()) {
+            throw new BusinessException("At least one selection is required");
         }
 
-        // Find the selected option
-        EventOption selectedOption = event.getOptions().stream()
-                .filter(opt -> opt.getId().equals(request.getOptionId()))
-                .findFirst()
-                .orElseThrow(() -> new ResourceNotFoundException("Option", request.getOptionId()));
+        // Validate: no duplicate events in multiple bet
+        Set<String> eventIds = new HashSet<>();
+        for (BetSelection sel : selections) {
+            if (!eventIds.add(sel.getEventId())) {
+                throw new BusinessException("Cannot select multiple options from the same event");
+            }
+        }
+
+        // Determine bet type
+        BetType betType = selections.size() == 1 ? BetType.SINGLE : BetType.MULTIPLE;
+
+        // Build legs and calculate total odd
+        List<BetLeg> legs = new ArrayList<>();
+        BigDecimal totalOdd = BigDecimal.ONE;
+        List<Event> eventsToUpdate = new ArrayList<>();
+
+        for (BetSelection selection : selections) {
+            Event event = eventService.findEventById(selection.getEventId());
+
+            // Validate event is open for betting
+            if (event.getStatus() != EventStatus.OPEN) {
+                throw new BusinessException("Event '" + event.getTitle() + "' is not open for betting");
+            }
+
+            // Find the selected option
+            EventOption selectedOption = event.getOptions().stream()
+                    .filter(opt -> opt.getId().equals(selection.getOptionId()))
+                    .findFirst()
+                    .orElseThrow(() -> new ResourceNotFoundException("Option", selection.getOptionId()));
+
+            // Snapshot the locked odd
+            BigDecimal lockedOdd = selectedOption.getCurrentOdd();
+            totalOdd = totalOdd.multiply(lockedOdd);
+
+            // Create leg
+            BetLeg leg = BetLeg.builder()
+                    .eventId(event.getId())
+                    .eventTitle(event.getTitle())
+                    .chosenOptionId(selection.getOptionId())
+                    .chosenOptionLabel(selectedOption.getName())
+                    .lockedOdd(lockedOdd)
+                    .status(LegStatus.PENDING)
+                    .build();
+
+            legs.add(leg);
+
+            // Update total staked on option
+            selectedOption.setTotalStaked(
+                    selectedOption.getTotalStaked().add(request.getAmount()));
+
+            // Recalculate odds if dynamic parimutuel
+            if (event.getPricingModel() == PricingModel.DYNAMIC_PARIMUTUEL) {
+                recalculateDynamicOdds(event);
+            }
+
+            eventsToUpdate.add(event);
+        }
+
+        // Round total odd
+        totalOdd = totalOdd.setScale(2, RoundingMode.HALF_UP);
+
+        // Calculate potential payout
+        BigDecimal potentialPayout = request.getAmount().multiply(totalOdd)
+                .setScale(2, RoundingMode.HALF_UP);
 
         // Validate user has sufficient balance
         if (!walletService.hasBalance(userId, request.getAmount())) {
             throw new BusinessException("Insufficient balance");
         }
 
-        // Snapshot the locked odd
-        BigDecimal lockedOdd = selectedOption.getCurrentOdd();
-        BigDecimal potentialPayout = request.getAmount().multiply(lockedOdd)
-                .setScale(2, RoundingMode.HALF_UP);
-
         // Debit wallet
         walletService.debit(userId, request.getAmount(), TransactionOrigin.BET_ENTRY, null);
 
-        // Create bet
+        // Create bet with legs
         Bet bet = Bet.builder()
                 .userId(userId)
-                .eventId(event.getId())
-                .chosenOptionId(request.getOptionId())
-                .lockedOdd(lockedOdd)
+                .type(betType)
+                .legs(legs)
+                .totalOdd(totalOdd)
                 .amount(request.getAmount())
                 .potentialPayout(potentialPayout)
                 .status(BetStatus.PENDING)
                 .createdAt(LocalDateTime.now())
                 .build();
 
-        bet = betRepository.save(bet);
-
-        // Update total staked on option
-        selectedOption.setTotalStaked(
-                selectedOption.getTotalStaked().add(request.getAmount()));
-
-        // Recalculate odds if dynamic parimutuel
-        if (event.getPricingModel() == PricingModel.DYNAMIC_PARIMUTUEL) {
-            recalculateDynamicOdds(event);
+        // For backward compatibility, also set legacy fields for single bets
+        if (betType == BetType.SINGLE) {
+            BetLeg firstLeg = legs.get(0);
+            bet.setEventId(firstLeg.getEventId());
+            bet.setChosenOptionId(firstLeg.getChosenOptionId());
+            bet.setLockedOdd(firstLeg.getLockedOdd());
         }
 
-        eventService.saveEvent(event);
+        bet = betRepository.save(bet);
 
-        // Broadcast event update via WebSocket
-        webSocketService.broadcastEventUpdate(eventService.toResponse(event));
+        // Save all updated events and broadcast
+        for (Event event : eventsToUpdate) {
+            eventService.saveEvent(event);
+            webSocketService.broadcastEventUpdate(eventService.toResponse(event));
+        }
 
-        return toBetResponse(bet, event, selectedOption);
+        return toBetResponse(bet);
     }
 
     private void recalculateDynamicOdds(Event event) {
@@ -124,14 +186,7 @@ public class BetService {
 
     public List<BetResponse> getUserBets(String userId) {
         return betRepository.findByUserId(userId).stream()
-                .map(bet -> {
-                    Event event = eventService.findEventById(bet.getEventId());
-                    EventOption option = event.getOptions().stream()
-                            .filter(opt -> opt.getId().equals(bet.getChosenOptionId()))
-                            .findFirst()
-                            .orElse(null);
-                    return toBetResponse(bet, event, option);
-                })
+                .map(this::toBetResponse)
                 .collect(Collectors.toList());
     }
 
@@ -139,22 +194,103 @@ public class BetService {
         return betRepository.findByEventIdAndStatus(eventId, BetStatus.PENDING);
     }
 
+    /**
+     * Find all pending bets that have a leg for the given event
+     */
+    public List<Bet> findPendingBetsWithEventLeg(String eventId) {
+        return betRepository.findByLegsEventIdAndStatus(eventId, BetStatus.PENDING);
+    }
+
     public Bet saveBet(Bet bet) {
         return betRepository.save(bet);
     }
 
-    private BetResponse toBetResponse(Bet bet, Event event, EventOption option) {
-        return BetResponse.builder()
+    /**
+     * Convert Bet entity to BetResponse DTO
+     */
+    public BetResponse toBetResponse(Bet bet) {
+        // Handle legacy bets (no legs array)
+        if (bet.isLegacyBet()) {
+            return convertLegacyBet(bet);
+        }
+
+        List<LegResponse> legResponses = bet.getLegs().stream()
+                .map(leg -> LegResponse.builder()
+                        .eventId(leg.getEventId())
+                        .eventTitle(leg.getEventTitle())
+                        .chosenOptionId(leg.getChosenOptionId())
+                        .chosenOptionName(leg.getChosenOptionLabel())
+                        .lockedOdd(leg.getLockedOdd())
+                        .status(leg.getStatus())
+                        .build())
+                .collect(Collectors.toList());
+
+        BetResponse.BetResponseBuilder builder = BetResponse.builder()
                 .id(bet.getId())
-                .eventId(bet.getEventId())
-                .eventTitle(event != null ? event.getTitle() : null)
-                .chosenOptionId(bet.getChosenOptionId())
-                .chosenOptionName(option != null ? option.getName() : null)
-                .lockedOdd(bet.getLockedOdd())
+                .type(bet.getType() != null ? bet.getType() : BetType.SINGLE)
+                .totalOdd(bet.getTotalOdd())
                 .amount(bet.getAmount())
                 .potentialPayout(bet.getPotentialPayout())
                 .status(bet.getStatus())
                 .createdAt(bet.getCreatedAt())
+                .legs(legResponses);
+
+        // For backward compatibility, populate legacy fields from first leg
+        if (!bet.getLegs().isEmpty()) {
+            BetLeg firstLeg = bet.getLegs().get(0);
+            builder.eventId(firstLeg.getEventId())
+                    .eventTitle(firstLeg.getEventTitle())
+                    .chosenOptionId(firstLeg.getChosenOptionId())
+                    .chosenOptionName(firstLeg.getChosenOptionLabel())
+                    .lockedOdd(firstLeg.getLockedOdd());
+        }
+
+        return builder.build();
+    }
+
+    /**
+     * Convert legacy bet (without legs) to response
+     */
+    private BetResponse convertLegacyBet(Bet bet) {
+        Event event = null;
+        EventOption option = null;
+
+        try {
+            event = eventService.findEventById(bet.getEventId());
+            option = event.getOptions().stream()
+                    .filter(opt -> opt.getId().equals(bet.getChosenOptionId()))
+                    .findFirst()
+                    .orElse(null);
+        } catch (Exception e) {
+            // Event may have been deleted
+        }
+
+        // Create a single leg response for legacy bet
+        LegResponse legResponse = LegResponse.builder()
+                .eventId(bet.getEventId())
+                .eventTitle(event != null ? event.getTitle() : "Unknown Event")
+                .chosenOptionId(bet.getChosenOptionId())
+                .chosenOptionName(option != null ? option.getName() : "Unknown Option")
+                .lockedOdd(bet.getLockedOdd())
+                .status(bet.getStatus() == BetStatus.WON ? LegStatus.WON
+                        : bet.getStatus() == BetStatus.LOST ? LegStatus.LOST : LegStatus.PENDING)
+                .build();
+
+        return BetResponse.builder()
+                .id(bet.getId())
+                .type(BetType.SINGLE)
+                .totalOdd(bet.getLockedOdd())
+                .amount(bet.getAmount())
+                .potentialPayout(bet.getPotentialPayout())
+                .status(bet.getStatus())
+                .createdAt(bet.getCreatedAt())
+                .legs(List.of(legResponse))
+                // Legacy fields
+                .eventId(bet.getEventId())
+                .eventTitle(event != null ? event.getTitle() : "Unknown Event")
+                .chosenOptionId(bet.getChosenOptionId())
+                .chosenOptionName(option != null ? option.getName() : "Unknown Option")
+                .lockedOdd(bet.getLockedOdd())
                 .build();
     }
 }

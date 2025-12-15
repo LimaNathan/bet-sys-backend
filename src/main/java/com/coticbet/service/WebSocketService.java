@@ -38,4 +38,14 @@ public class WebSocketService {
     public void notifyUser(String userId, Object payload) {
         messagingTemplate.convertAndSend("/topic/user/" + userId + "/notifications", payload);
     }
+
+    /**
+     * Broadcast a notification to all connected users (global topic)
+     */
+    public void broadcastGlobalNotification(String type, String message) {
+        Map<String, String> notification = Map.of(
+                "type", type,
+                "message", message);
+        messagingTemplate.convertAndSend("/topic/global/notifications", notification);
+    }
 }

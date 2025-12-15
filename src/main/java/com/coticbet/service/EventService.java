@@ -55,6 +55,12 @@ public class EventService {
                 .build();
 
         event = eventRepository.save(event);
+
+        // Notify all users about new internal event
+        webSocketService.broadcastGlobalNotification(
+                "NEW_EVENT",
+                String.format("🎯 Novo evento interno: %s", event.getTitle()));
+
         return toResponse(event);
     }
 

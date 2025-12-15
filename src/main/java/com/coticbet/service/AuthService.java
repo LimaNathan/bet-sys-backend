@@ -23,51 +23,60 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public class AuthService {
 
-    private final UserRepository userRepository;
-    private final PasswordEncoder passwordEncoder;
-    private final JwtUtil jwtUtil;
-    private final AuthenticationManager authenticationManager;
+        private final UserRepository userRepository;
+        private final PasswordEncoder passwordEncoder;
+        private final JwtUtil jwtUtil;
+        private final AuthenticationManager authenticationManager;
 
-    public AuthResponse register(RegisterRequest request) {
-        if (userRepository.existsByEmail(request.getEmail())) {
-            throw new BusinessException("Email already registered");
+        public AuthResponse register(RegisterRequest request) {
+                if (userRepository.existsByEmail(request.getEmail())) {
+                        throw new BusinessException("Email já cadastrado");
+                }
+
+                // Use name from request, fallback to email prefix if null
+                String displayName = request.getName();
+                if (displayName == null || displayName.isBlank()) {
+                        displayName = request.getEmail().split("@")[0];
+                }
+
+                User user = User.builder()
+                                .email(request.getEmail())
+                                .name(displayName)
+                                .password(passwordEncoder.encode(request.getPassword()))
+                                .role(Role.USER)
+                                .walletBalance(BigDecimal.ZERO)
+                                .createdAt(LocalDateTime.now())
+                                .updatedAt(LocalDateTime.now())
+                                .build();
+
+                user = userRepository.save(user);
+
+                String token = jwtUtil.generateToken(user.getEmail(), user.getRole().name());
+
+                return AuthResponse.builder()
+                                .token(token)
+                                .userId(user.getId())
+                                .email(user.getEmail())
+                                .name(user.getName())
+                                .role(user.getRole().name())
+                                .build();
         }
 
-        User user = User.builder()
-                .email(request.getEmail())
-                .password(passwordEncoder.encode(request.getPassword()))
-                .role(Role.USER)
-                .walletBalance(BigDecimal.ZERO)
-                .createdAt(LocalDateTime.now())
-                .updatedAt(LocalDateTime.now())
-                .build();
+        public AuthResponse login(AuthRequest request) {
+                authenticationManager.authenticate(
+                                new UsernamePasswordAuthenticationToken(request.getEmail(), request.getPassword()));
 
-        user = userRepository.save(user);
+                User user = userRepository.findByEmail(request.getEmail())
+                                .orElseThrow(() -> new BusinessException("Usuário não encontrado"));
 
-        String token = jwtUtil.generateToken(user.getEmail(), user.getRole().name());
+                String token = jwtUtil.generateToken(user.getEmail(), user.getRole().name());
 
-        return AuthResponse.builder()
-                .token(token)
-                .email(user.getEmail())
-                .role(user.getRole().name())
-                .userId(user.getId())
-                .build();
-    }
-
-    public AuthResponse login(AuthRequest request) {
-        authenticationManager.authenticate(
-                new UsernamePasswordAuthenticationToken(request.getEmail(), request.getPassword()));
-
-        User user = userRepository.findByEmail(request.getEmail())
-                .orElseThrow(() -> new BusinessException("User not found"));
-
-        String token = jwtUtil.generateToken(user.getEmail(), user.getRole().name());
-
-        return AuthResponse.builder()
-                .token(token)
-                .email(user.getEmail())
-                .role(user.getRole().name())
-                .userId(user.getId())
-                .build();
-    }
+                return AuthResponse.builder()
+                                .token(token)
+                                .userId(user.getId())
+                                .email(user.getEmail())
+                                .name(user.getName())
+                                .role(user.getRole().name())
+                                .build();
+        }
 }

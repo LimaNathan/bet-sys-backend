@@ -2,6 +2,8 @@ package com.coticbet.domain.entity;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.List;
 
 import org.springframework.data.annotation.Id;
 import org.springframework.data.mongodb.core.index.Indexed;
@@ -27,6 +29,8 @@ public class User {
     @Indexed(unique = true)
     private String email;
 
+    private String name;
+
     private String password;
 
     @Builder.Default
@@ -35,9 +39,17 @@ public class User {
     @Builder.Default
     private BigDecimal walletBalance = BigDecimal.ZERO;
 
+    @Builder.Default
+    private List<Badge> badges = new ArrayList<>();
+
     private LocalDateTime lastDailyBonus;
 
     private LocalDateTime createdAt;
 
     private LocalDateTime updatedAt;
+
+    public boolean hasBadge(com.coticbet.domain.enums.BadgeType badgeType) {
+        return badges != null && badges.stream()
+                .anyMatch(b -> b.getCode() == badgeType);
+    }
 }

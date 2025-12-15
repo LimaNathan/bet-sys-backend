@@ -1,5 +1,7 @@
 package com.coticbet.dto.response;
 
+import java.math.BigDecimal;
+
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -9,11 +11,11 @@ import lombok.NoArgsConstructor;
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-public class AuthResponse {
+public class LeaderboardEntry {
 
-    private String token;
+    private int rank;
     private String userId;
-    private String email;
     private String name;
-    private String role;
+    private BigDecimal value;
+    private String valueLabel;
 }
