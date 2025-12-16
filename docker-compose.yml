@@ -1,0 +1,45 @@
+version: '3.8'
+
+services:
+  mongodb:
+    image: mongo:6.0
+    container_name: coticbet-mongodb
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: root
+      MONGO_INITDB_ROOT_PASSWORD: rootpassword
+      MONGO_INITDB_DATABASE: coticbet
+    volumes:
+      - mongodb_data:/data/db
+    networks:
+      - coticbet-network
+
+  backend:
+    image: registry.local/bet-backend:latest
+    container_name: coticbet-backend
+    restart: unless-stopped
+    ports:
+      - "172.25.10.34:8090:8090"
+    environment:
+      MONGODB_URI: mongodb://root:rootpassword@mongodb:27017/coticbet?authSource=admin
+      JWT_SECRET: ${JWT_SECRET:-default-secret-key-for-development-only-change-in-production}
+      JWT_EXPIRATION: ${JWT_EXPIRATION:-86400000}
+      DAILY_BONUS_AMOUNT: ${DAILY_BONUS_AMOUNT:-100}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@coticbet.com}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin123}
+      ADMIN_INITIAL_BALANCE: ${ADMIN_INITIAL_BALANCE:-10000}
+      ODDS_API_KEY: ${ODDS_API_KEY:-74b0d97c2323c279b2e4306b3f7fd045}
+    depends_on:
+      - mongodb
+    networks:
+      - coticbet-network
+
+volumes:
+  mongodb_data:
+    driver: local
+
+networks:
+  coticbet-network:
+    driver: bridge
