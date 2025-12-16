@@ -13,7 +13,7 @@
 
     <groupId>com.coticbet</groupId>
     <artifactId>cotic-bet-backend</artifactId>
-    <version>0.0.1-SNAPSHOT</version>
+    <version>0.0.3</version>
     <name>cotic-bet-backend</name>
     <description>Corporate Betting System Backend</description>
 
