@@ -18,7 +18,9 @@ import com.coticbet.repository.UserRepository;
 import com.coticbet.security.JwtUtil;
 
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class AuthService {
@@ -29,7 +31,10 @@ public class AuthService {
         private final AuthenticationManager authenticationManager;
 
         public AuthResponse register(RegisterRequest request) {
+                log.info("[REGISTER] Iniciando registro - email={}", request.getEmail());
+
                 if (userRepository.existsByEmail(request.getEmail())) {
+                        log.warn("[REGISTER] Email já cadastrado - email={}", request.getEmail());
                         throw new BusinessException("Email já cadastrado");
                 }
 
@@ -50,8 +55,11 @@ public class AuthService {
                                 .build();
 
                 user = userRepository.save(user);
+                log.info("[REGISTER] Usuário criado com sucesso - userId={}, email={}, role={}",
+                                user.getId(), user.getEmail(), user.getRole());
 
                 String token = jwtUtil.generateToken(user.getEmail(), user.getRole().name());
+                log.debug("[REGISTER] Token JWT gerado - userId={}", user.getId());
 
                 return AuthResponse.builder()
                                 .token(token)
@@ -63,13 +71,25 @@ public class AuthService {
         }
 
         public AuthResponse login(AuthRequest request) {
-                authenticationManager.authenticate(
-                                new UsernamePasswordAuthenticationToken(request.getEmail(), request.getPassword()));
+                log.info("[LOGIN] Tentativa de login - email={}", request.getEmail());
+
+                try {
+                        authenticationManager.authenticate(
+                                        new UsernamePasswordAuthenticationToken(request.getEmail(),
+                                                        request.getPassword()));
+                        log.debug("[LOGIN] Autenticação bem-sucedida - email={}", request.getEmail());
+                } catch (Exception e) {
+                        log.warn("[LOGIN] Falha na autenticação - email={}, erro={}",
+                                        request.getEmail(), e.getMessage());
+                        throw e;
+                }
 
                 User user = userRepository.findByEmail(request.getEmail())
                                 .orElseThrow(() -> new BusinessException("Usuário não encontrado"));
 
                 String token = jwtUtil.generateToken(user.getEmail(), user.getRole().name());
+                log.info("[LOGIN] Login bem-sucedido - userId={}, email={}, role={}",
+                                user.getId(), user.getEmail(), user.getRole());
 
                 return AuthResponse.builder()
                                 .token(token)

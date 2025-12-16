@@ -10,7 +10,8 @@ jwt:
   expiration: ${JWT_EXPIRATION:86400000}
 
 server:
-  port: 8080
+  port: 8090
+  address: 0.0.0.0
 
 app:
   daily-bonus-amount: ${DAILY_BONUS_AMOUNT:100}
@@ -27,5 +28,9 @@ app:
 
 logging:
   level:
-    com.coticbet: DEBUG
+    com.coticbet: INFO
+    com.coticbet.security: DEBUG
     org.springframework.security: INFO
+    org.springframework.web: INFO
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n"

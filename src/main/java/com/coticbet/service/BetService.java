@@ -34,7 +34,9 @@ import com.coticbet.repository.BetRepository;
 import com.coticbet.repository.UserRepository;
 
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class BetService {
@@ -47,11 +49,16 @@ public class BetService {
 
     @Transactional
     public BetResponse placeBet(String userId, PlaceBetRequest request) {
+        log.info("[BET] Iniciando aposta - userId={}, tipo={}, valor={}, seleções={}",
+                userId, request.getSelections().size() == 1 ? "SINGLE" : "MULTIPLE",
+                request.getAmount(), request.getSelections().size());
+
         // Check if user is admin - admins cannot bet
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new ResourceNotFoundException("User", userId));
 
         if (user.getRole() == Role.ADMIN) {
+            log.warn("[BET] Administrador tentou fazer aposta - userId={}", userId);
             throw new BusinessException("Administrators cannot place bets");
         }
 
@@ -129,8 +136,11 @@ public class BetService {
 
         // Validate user has sufficient balance
         if (!walletService.hasBalance(userId, request.getAmount())) {
+            log.warn("[BET] Saldo insuficiente - userId={}, valor={}", userId, request.getAmount());
             throw new BusinessException("Insufficient balance");
         }
+
+        log.debug("[BET] Validações OK - odd total={}, payout potencial={}", totalOdd, potentialPayout);
 
         // Debit wallet
         walletService.debit(userId, request.getAmount(), TransactionOrigin.BET_ENTRY, null);
@@ -156,6 +166,8 @@ public class BetService {
         }
 
         bet = betRepository.save(bet);
+        log.info("[BET] Aposta criada com sucesso - betId={}, userId={}, tipo={}, valor={}, payout potencial={}",
+                bet.getId(), userId, betType, request.getAmount(), potentialPayout);
 
         // Save all updated events and broadcast
         for (Event event : eventsToUpdate) {
